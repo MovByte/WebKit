@@ -44,9 +44,15 @@ CONCURRENT_SAFE void StackManager::cancelStop()
         return;
 
     Locker lock { m_mirrorLock };
+#if ENABLE(C_LOOP)
+    m_trapAwareSoftStackLimit.storeRelaxed(m_cloopStackLimit);
+    for (auto& mirror : m_mirrors)
+        mirror.m_trapAwareSoftStackLimit.storeRelaxed(m_cloopStackLimit);
+#else
     m_trapAwareSoftStackLimit.storeRelaxed(m_softStackLimit);
     for (auto& mirror : m_mirrors)
         mirror.m_trapAwareSoftStackLimit.storeRelaxed(m_softStackLimit);
+#endif
 }
 
 void StackManager::setStackSoftLimit(void* newStackLimit)
