@@ -87,6 +87,11 @@
 #define WTF_OS_MACOS 1
 #endif
 
+/* OS(EMSCRIPTEN) - Emscripten */
+#if defined(__EMSCRIPTEN__)
+#define WTF_OS_EMSCRIPTEN 1
+#endif
+
 /* OS(FREEBSD) - FreeBSD */
 #if defined(__FreeBSD__) || defined(__DragonFly__) || defined(__FreeBSD_kernel__)
 #define WTF_OS_FREEBSD 1
@@ -135,6 +140,7 @@
 /* OS(UNIX) - Any Unix-like system */
 #if    OS(AIX)              \
     || OS(DARWIN)           \
+    || OS(EMSCRIPTEN)       \
     || OS(FREEBSD)          \
     || OS(FUCHSIA)          \
     || OS(HAIKU)            \
