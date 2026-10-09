@@ -68,8 +68,8 @@ void BlockDirectory::updatePercentageOfPagedOutPages(SimpleStats& stats)
 {
     // FIXME: We should figure out a solution for Windows and PlayStation.
     // QNX doesn't have mincore(), though the information can be had. But since all mapped
-    // pages are resident, does it matter?
-#if OS(UNIX) && !PLATFORM(PLAYSTATION) && !OS(QNX) && !OS(HAIKU)
+    // pages are resident, does it matter? WebAssembly linear memory is never paged out either.
+#if OS(UNIX) && !PLATFORM(PLAYSTATION) && !OS(QNX) && !OS(HAIKU) && !OS(EMSCRIPTEN)
     size_t pageSize = WTF::pageSize();
     ASSERT(!(MarkedBlock::blockSize % pageSize));
     auto numberOfPagesInMarkedBlock = MarkedBlock::blockSize / pageSize;
