@@ -134,9 +134,11 @@ static RefPtr<BufferMemoryHandle> tryAllocateResizableMemory(VM* vm, size_t size
         return nullptr;
     }
 
+#if !OS(EMSCRIPTEN)
     constexpr bool readable = false;
     constexpr bool writable = false;
     OSAllocator::protect(slowMemory + initialBytes, maximumBytes - initialBytes, readable, writable);
+#endif
     return adoptRef(*new BufferMemoryHandle(slowMemory, initialBytes, maximumBytes, PageCount::fromBytes(initialBytes), PageCount::fromBytes(maximumBytes), MemorySharingMode::Shared, MemoryMode::BoundsChecking));
 }
 
@@ -630,6 +632,7 @@ Expected<int64_t, GrowFailReason> ArrayBuffer::resize(VM& vm, size_t newByteLeng
                 void* memory = memoryHandle->memory();
                 RELEASE_ASSERT(memory);
 
+#if !OS(EMSCRIPTEN)
                 // Signaling memory must have been pre-allocated virtually.
                 uint8_t* startAddress = static_cast<uint8_t*>(memory) + desiredSize;
 
@@ -637,6 +640,7 @@ Expected<int64_t, GrowFailReason> ArrayBuffer::resize(VM& vm, size_t newByteLeng
                 constexpr bool readable = false;
                 constexpr bool writable = false;
                 OSAllocator::protect(startAddress, bytesToSubtract, readable, writable);
+#endif
             }
             memoryHandle->updateSize(desiredSize);
         }
