@@ -47,6 +47,10 @@
 #include <wtf/ThreadMessage.h>
 #include <wtf/threads/Signals.h>
 
+#if ENABLE(C_LOOP) && ENABLE(SAMPLING_PROFILER)
+#include "SamplingProfiler.h"
+#endif
+
 namespace JSC {
 
 #if ENABLE(SIGNAL_BASED_VM_TRAPS)
@@ -449,6 +453,7 @@ bool VMTraps::handleTraps(VMTraps::BitField mask)
     if (isDeferringTermination())
         mask &= ~NeedTermination;
 
+#if !ENABLE(C_LOOP)
     {
         Locker codeBlockSetLocker { vm.heap.codeBlockSet().getLock() };
         vm.heap.forEachCodeBlockIgnoringJITPlans(codeBlockSetLocker, [&] (CodeBlock* codeBlock) {
@@ -457,6 +462,7 @@ bool VMTraps::handleTraps(VMTraps::BitField mask)
                 codeBlock->jettison(Profiler::JettisonDueToVMTraps);
         });
     }
+#endif
 
     auto takeTopPriorityTrap = [&] (VMTraps::BitField mask) -> Event {
         Locker locker { *m_trapSignalingLock };
@@ -509,6 +515,14 @@ bool VMTraps::handleTraps(VMTraps::BitField mask)
             VMManager::singleton().notifyVMStop(vm, StopTheWorldEvent::VMStopped);
             didHandleTrap = true;
             break;
+
+#if ENABLE(C_LOOP) && ENABLE(SAMPLING_PROFILER)
+        case NeedSamplingProfilerSample:
+            if (RefPtr samplingProfiler = vm.samplingProfiler())
+                samplingProfiler->takeSampleAtTrapCheck();
+            didHandleTrap = true;
+            break;
+#endif
 
         // cancelStop() cleared the bit between needHandling() and takeTopPriorityTrap().
         case NoEvent:
@@ -572,5 +586,19 @@ VMTraps::~VMTraps()
     ASSERT(!m_signalSender);
 #endif
 }
+
+#if ENABLE(C_LOOP) && ENABLE(SAMPLING_PROFILER)
+void VMTraps::handleSamplingProfilerTrap()
+{
+    if (m_trapsDeferred)
+        return;
+
+    if (!clearTrap(NeedSamplingProfilerSample))
+        return;
+
+    if (RefPtr samplingProfiler = vm().samplingProfiler())
+        samplingProfiler->takeSampleAtTrapCheck();
+}
+#endif
 
 } // namespace JSC

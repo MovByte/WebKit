@@ -843,8 +843,9 @@
 /* The SamplingProfiler is the probabilistic and low-overhead profiler used by
  * JSC to measure where time is spent inside a JavaScript program.
  * In configurations other than Windows and Darwin, because layout of mcontext_t depends on standard libraries (like glibc),
- * sampling profiler is enabled if WebKit uses pthreads and glibc. */
-#if !defined(ENABLE_SAMPLING_PROFILER) && (!ENABLE(C_LOOP) && (OS(WINDOWS) || HAVE(MACHINE_CONTEXT)))
+ * sampling profiler is enabled if WebKit uses pthreads and glibc.
+ * The C_LOOP needs neither, because it takes samples at trap checks instead of reading registers. */
+#if !defined(ENABLE_SAMPLING_PROFILER) && (ENABLE(C_LOOP) || OS(WINDOWS) || HAVE(MACHINE_CONTEXT))
 #define ENABLE_SAMPLING_PROFILER 1
 #endif
 

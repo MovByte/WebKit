@@ -185,6 +185,9 @@ public:
     JS_EXPORT_PRIVATE ~SamplingProfiler();
     void noticeJSLockAcquisition();
     void noticeVMEntry();
+#if ENABLE(C_LOOP)
+    void takeSampleAtTrapCheck();
+#endif
     void shutdown();
     template<typename Visitor> void visit(Visitor&) WTF_REQUIRES_LOCK(m_lock);
     Lock& getLock() LIFETIME_BOUND WTF_RETURNS_LOCK(m_lock) { return m_lock; }

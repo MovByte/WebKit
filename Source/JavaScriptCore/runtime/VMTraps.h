@@ -144,6 +144,21 @@ public:
     //    part of VMTraps allows RETURN_IF_EXCEPTION to optimally only do a single
     //    check to determine if the VM possibly has a pending exception to handle,
     //    as well as if there are asynchronous VMTraps events to handle.
+    //
+    //  NeedSamplingProfilerSample
+    //  - Only used by the C_LOOP. The CLoop keeps its virtual registers in
+    //    interpreter locals, so the SamplingProfiler thread cannot read the
+    //    mutator's PC and call frame the way it does for JIT and LLInt code.
+    //    Instead, it fires this event, and the mutator records its own stack
+    //    the next time it services traps, or when a host function returns to
+    //    the interpreter.
+
+#if ENABLE(C_LOOP) && ENABLE(SAMPLING_PROFILER)
+#define FOR_EACH_CLOOP_VMTRAPS_EVENTS(v) \
+    v(NeedSamplingProfilerSample)
+#else
+#define FOR_EACH_CLOOP_VMTRAPS_EVENTS(v)
+#endif
 
 // WARNING: Do NOT sort this list. Read comment above for the reason.
 #define FOR_EACH_VMTRAPS_EVENTS(v) \
@@ -152,7 +167,8 @@ public:
     v(NeedWatchdogCheck) \
     v(NeedDebuggerBreak) \
     v(NeedStopTheWorld) \
-    v(NeedExceptionHandling)
+    v(NeedExceptionHandling) \
+    FOR_EACH_CLOOP_VMTRAPS_EVENTS(v)
 
 #define DECLARE_VMTRAPS_EVENT_BIT_SHIFT(event__)  event__##BitShift,
     enum EventBitShift {
@@ -174,6 +190,7 @@ public:
 #undef DECLARE_VMTRAPS_EVENT
 
 #undef FOR_EACH_VMTRAPS_EVENTS
+#undef FOR_EACH_CLOOP_VMTRAPS_EVENTS
 
     static constexpr Event NoEvent = 0;
 
@@ -254,6 +271,16 @@ public:
     // The following returns true if a trap was handled.
     bool handleTraps(BitField mask = AsyncEvents);
     bool handleTrapsIfNeeded(BitField mask = AsyncEvents);
+
+#if ENABLE(C_LOOP) && ENABLE(SAMPLING_PROFILER)
+    // Host functions do not check traps, so the CLoop calls this when one returns.
+    ALWAYS_INLINE void handleSamplingProfilerTrapIfNeeded()
+    {
+        if (needHandling(NeedSamplingProfilerSample)) [[unlikely]]
+            handleSamplingProfilerTrap();
+    }
+    void handleSamplingProfilerTrap();
+#endif
 
 #if ENABLE(SIGNAL_BASED_VM_TRAPS)
     struct SignalContext;

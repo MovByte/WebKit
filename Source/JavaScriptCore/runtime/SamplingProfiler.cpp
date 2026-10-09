@@ -205,6 +205,10 @@ protected:
 
     bool NODELETE isValidFramePointer(void* callFrame)
     {
+#if ENABLE(C_LOOP)
+        // CLoop frames live on the CLoopStack rather than on a machine thread's stack.
+        return m_vm.cloopStack().containsAddress(static_cast<Register*>(callFrame));
+#else
         uint8_t* fpCast = std::bit_cast<uint8_t*>(callFrame);
         for (auto& thread : m_vm.heap.machineThreads().threads(m_machineThreadsLocker)) {
             uint8_t* stackBase = static_cast<uint8_t*>(thread->stack().origin());
@@ -216,6 +220,7 @@ protected:
                 return true;
         }
         return false;
+#endif
     }
 
     bool isValidCodeBlock(CodeBlock* codeBlock)
@@ -372,6 +377,14 @@ void SamplingProfiler::timerLoop()
 void SamplingProfiler::takeSample(Seconds& stackTraceProcessingTime)
 {
     ASSERT(m_lock.isLocked());
+#if ENABLE(C_LOOP)
+    // The CLoop's virtual registers are interpreter locals, so this thread has no machine
+    // state to read. Ask the JS thread to record its own stack at its next trap check
+    // instead. See takeSampleAtTrapCheck().
+    UNUSED_PARAM(stackTraceProcessingTime);
+    if (m_vm.entryScope)
+        m_vm.traps().fireTrap(VMTraps::NeedSamplingProfilerSample);
+#else
     if (m_vm.entryScope) {
         auto [ nowTime, timestamp ] = m_stopwatch->elapsedTimeAndTimestamp();
 
@@ -472,6 +485,7 @@ void SamplingProfiler::takeSample(Seconds& stackTraceProcessingTime)
             stackTraceProcessingTime = endTime - startTime;
         }
     }
+#endif
 }
 
 static ALWAYS_INLINE BytecodeIndex NODELETE tryGetBytecodeIndex(unsigned llintPC, CodeBlock* codeBlock)
@@ -786,6 +800,12 @@ void SamplingProfiler::noticeVMEntry()
     ASSERT(m_vm.entryScope);
     noticeCurrentThreadAsJSCExecutionThreadWithLock();
     createThreadIfNecessary();
+#if ENABLE(C_LOOP)
+    // A request still pending from the previous entry belongs to code that has already
+    // finished running, so it must not be recorded against this one.
+    if (m_vm.traps().needHandling(VMTraps::NeedSamplingProfilerSample))
+        m_vm.traps().clearTrap(VMTraps::NeedSamplingProfilerSample);
+#endif
 }
 
 void SamplingProfiler::clearData()
@@ -1403,6 +1423,39 @@ Thread* SamplingProfiler::thread() const
 {
     return m_thread.get();
 }
+
+#if ENABLE(C_LOOP)
+void SamplingProfiler::takeSampleAtTrapCheck()
+{
+    // This runs on the JS thread at a point where vm.topCallFrame is current and every
+    // CLoop frame on the stack has stored its bytecode offset as its call site index.
+    Locker locker { m_lock };
+    if (m_isPaused || !m_vm.entryScope)
+        return;
+
+    auto [ nowTime, timestamp ] = m_stopwatch->elapsedTimeAndTimestamp();
+
+    Locker machineThreadsLocker { m_vm.heap.machineThreads().getLock() };
+    Locker codeBlockSetLocker { m_vm.heap.codeBlockSet().getLock() };
+
+    bool didRunOutOfVectorSpace;
+    FrameWalker walker(m_vm, m_vm.topCallFrame, codeBlockSetLocker, machineThreadsLocker);
+    size_t walkSize = walker.walk(m_currentFrames, didRunOutOfVectorSpace);
+    if (!walker.wasValidWalk() || !walkSize)
+        return;
+
+    if (sReportStats)
+        sNumTotalStackTraces++;
+    Vector<UnprocessedStackFrame> stackTrace;
+    stackTrace.reserveInitialCapacity(walkSize);
+    stackTrace.appendRange(m_currentFrames.begin(), m_currentFrames.begin() + walkSize);
+
+    m_unprocessedStackTraces.append(UnprocessedStackTrace { timestamp, nowTime, nullptr, false, nullptr, m_vm.m_executingRegExp, WTF::move(stackTrace) });
+
+    if (didRunOutOfVectorSpace)
+        m_currentFrames.grow(m_currentFrames.size() * 1.25);
+}
+#endif
 
 } // namespace JSC
 
