@@ -111,7 +111,144 @@ def fileBytes(file)
             fileBytes << byte
         }
     }
+    fileBytes = wasmLinearMemory(fileBytes) if isWasmModule(fileBytes)
     fileBytes
+end
+
+#
+# WebAssembly extractors
+#
+# A wasm extractor keeps its magic numbers in data segments rather than in a
+# flat image, so the scanner reads the linear memory those segments produce.
+#
+
+WASM_MAGIC = [ 0x00, 0x61, 0x73, 0x6d ]
+WASM_CODE_SECTION_ID = 10
+WASM_DATA_SECTION_ID = 11
+WASM_I32_CONST = 0x41
+WASM_MISC_PREFIX = 0xfc
+WASM_MEMORY_INIT = 0x08
+
+def isWasmModule(bytes)
+    bytes[0, 4] == WASM_MAGIC
+end
+
+def readWasmUnsignedLEB128(bytes, offset)
+    result = 0
+    shift = 0
+    loop {
+        byte = bytes[offset]
+        offset += 1
+        result |= (byte & 0x7f) << shift
+        break if (byte & 0x80).zero?
+        shift += 7
+    }
+    [result, offset]
+end
+
+def readWasmSignedLEB128(bytes, offset)
+    result = 0
+    shift = 0
+    5.times {
+        byte = bytes[offset]
+        return [nil, offset] if byte.nil?
+        offset += 1
+        result |= (byte & 0x7f) << shift
+        shift += 7
+        if (byte & 0x80).zero?
+            result -= (1 << shift) if (byte & 0x40) != 0
+            return [result, offset]
+        end
+    }
+    [nil, offset]
+end
+
+def readWasmI32ConstOperands(bytes, cursor, count)
+    values = []
+    count.times {
+        return nil unless bytes[cursor] == WASM_I32_CONST
+        value, cursor = readWasmSignedLEB128(bytes, cursor + 1)
+        return nil if value.nil?
+        values << value
+    }
+    values + [cursor]
+end
+
+# A shared-memory module carries its data as passive segments that
+# __wasm_init_memory copies to fixed addresses with
+# "i32.const dst; i32.const 0; i32.const size; memory.init seg".
+def placeWasmPassiveSegments(bytes, codeRange, passiveSegments)
+    return [] if passiveSegments.empty?
+    raise "passive data segments without a code section" if codeRange.nil?
+
+    placed = {}
+    cursor = codeRange[0]
+    while cursor < codeRange[1]
+        operands = readWasmI32ConstOperands(bytes, cursor, 3)
+        if operands
+            destination, source, size, after = operands
+            if bytes[after] == WASM_MISC_PREFIX and bytes[after + 1] == WASM_MEMORY_INIT
+                segmentIndex, afterIndex = readWasmUnsignedLEB128(bytes, after + 2)
+                data = passiveSegments[segmentIndex]
+                if data and source == 0 and size == data.length and bytes[afterIndex] == 0
+                    placed[segmentIndex] = [destination, data]
+                end
+            end
+        end
+        cursor += 1
+    end
+    missing = passiveSegments.keys - placed.keys
+    raise "passive data segments #{missing.inspect} have no memory.init address" unless missing.empty?
+    placed.values
+end
+
+def wasmLinearMemory(bytes)
+    offset = 8
+    segments = []
+    passiveSegments = {}
+    codeRange = nil
+    while offset < bytes.length
+        sectionID = bytes[offset]
+        offset += 1
+        sectionSize, offset = readWasmUnsignedLEB128(bytes, offset)
+        sectionEnd = offset + sectionSize
+        codeRange = [offset, sectionEnd] if sectionID == WASM_CODE_SECTION_ID
+        if sectionID == WASM_DATA_SECTION_ID
+            count, cursor = readWasmUnsignedLEB128(bytes, offset)
+            count.times {
+                | segmentIndex |
+                flags, cursor = readWasmUnsignedLEB128(bytes, cursor)
+                if flags == 1
+                    size, cursor = readWasmUnsignedLEB128(bytes, cursor)
+                    passiveSegments[segmentIndex] = bytes[cursor, size]
+                    cursor += size
+                else
+                    if flags == 2
+                        cursor = readWasmUnsignedLEB128(bytes, cursor)[1]
+                    end
+                    cursor += 1
+                    address, cursor = readWasmUnsignedLEB128(bytes, cursor)
+                    cursor += 1
+                    size, cursor = readWasmUnsignedLEB128(bytes, cursor)
+                    segments << [address, bytes[cursor, size]]
+                    cursor += size
+                end
+            }
+        end
+        offset = sectionEnd
+    end
+
+    segments.concat(placeWasmPassiveSegments(bytes, codeRange, passiveSegments))
+    maxAddress = segments.map { | address, data | address + data.length }.max || 0
+    memory = Array.new(maxAddress, 0)
+    segments.each {
+        | address, data |
+        data.each_with_index {
+            | byte, index |
+            memory[address + index] = byte
+        }
+    }
+    memory
 end
 
 def sliceByteArrays(byteArray, pattern)
