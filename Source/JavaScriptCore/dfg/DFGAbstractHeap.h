@@ -401,4 +401,19 @@ template<> struct HashTraits<JSC::DFG::AbstractHeap> : SimpleClassHashTraits<JSC
 
 } // namespace WTF
 
+#else // ENABLE(DFG_JIT)
+
+namespace JSC { namespace DFG {
+
+// DOMJIT::Effect names abstract heaps even when the DFG is disabled.
+enum AbstractHeapKind : uint8_t {
+    InvalidAbstractHeap,
+    World,
+    Stack,
+    Heap,
+    SideState,
+};
+
+} } // namespace JSC::DFG
+
 #endif // ENABLE(DFG_JIT)
