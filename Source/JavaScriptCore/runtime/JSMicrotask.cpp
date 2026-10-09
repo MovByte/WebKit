@@ -65,7 +65,11 @@
 #include "VMTrapsInlines.h"
 #if USE(BUN_JSC_ADDITIONS)
 #include "InternalFieldTuple.h"
+#if OS(EMSCRIPTEN)
+extern "C" __attribute__((weak)) JSC::EncodedJSValue Bun__reportUnhandledError(JSC::JSGlobalObject*, JSC::EncodedJSValue);
+#else
 extern "C" __attribute__((weak)) void Bun__reportUnhandledError(JSC::JSGlobalObject*, JSC::EncodedJSValue);
+#endif
 #endif
 #if ENABLE(WEBASSEMBLY)
 #include "JSWebAssemblyStreamingContext.h"
